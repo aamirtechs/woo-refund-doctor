@@ -1,0 +1,497 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Woo Refund Doctor - AamirTechs</title>
+<style>
+:root{--navy:#0b1f3a;--gold:#d4a72c;--bg:#f6f8fb;--ink:#1c2733;--muted:#5b6b7c;--line:#d9e1ea}
+*{box-sizing:border-box}
+body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;background:var(--bg);color:var(--ink)}
+header{background:var(--navy);color:#fff;padding:28px 20px;border-bottom:4px solid var(--gold)}
+header .wrap{max-width:880px;margin:0 auto}
+header h1{margin:0 0 6px;font-size:1.6rem}
+header p{margin:0;color:#c8d4e4}
+main{max-width:880px;margin:24px auto;padding:0 20px}
+.card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:20px;box-shadow:0 1px 3px rgba(11,31,58,.08)}
+label{display:block;font-weight:600;margin:14px 0 6px}
+.card>label:first-child{margin-top:0}
+textarea{width:100%;min-height:180px;padding:10px;border:1px solid var(--line);border-radius:8px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.85rem}
+input[type=text],input[type=number],select{padding:8px 10px;border:1px solid var(--line);border-radius:8px;font-size:.95rem;width:100%}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:4px}
+.grid label{margin:0 0 6px}
+.row{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+button{background:var(--navy);color:#fff;border:0;border-radius:8px;padding:10px 18px;font-size:.95rem;cursor:pointer}
+button.alt{background:#fff;color:var(--navy);border:1px solid var(--navy)}
+button.gold{background:var(--gold);color:#0b1f3a;font-weight:600}
+pre{background:#0b1f3a;color:#eef3f9;border-radius:8px;padding:16px;overflow-x:auto;white-space:pre-wrap;word-break:break-word;min-height:60px;font-size:.85rem}
+footer{max-width:880px;margin:0 auto 32px;padding:0 20px;color:var(--muted);font-size:.9rem}
+footer a{color:var(--navy)}
+.hint{color:var(--muted);font-size:.85rem;margin-top:6px;font-weight:400}
+</style>
+</head>
+<body>
+<header><div class="wrap"><h1>Woo Refund Doctor</h1><p>Audit a WooCommerce refunds CSV export for the patterns that point at a product, listing, or fulfilment problem: one product taking a large share of refunds, repeat refunders, late refunds, full refunds on high-value orders, and refunds larger than the order total.</p></div></header>
+<main><div class="card">
+<label for="file">Input CSV file</label>
+<input type="file" id="file" accept=".csv,text/csv">
+<label for="input">Or paste the refunds CSV</label>
+<textarea id="input" spellcheck="false" placeholder="Paste a refunds CSV export here, or load the sample."></textarea>
+<label>Options</label>
+<div class="grid">
+<div><label for="opt-rate">Max rate percent <span class="hint">(--max-rate)</span></label><input type="number" id="opt-rate" step="any" value="20"></div>
+<div><label for="opt-days">Max days <span class="hint">(--max-days)</span></label><input type="number" id="opt-days" step="1" value="30"></div>
+<div><label for="opt-high">High value ($) <span class="hint">(--high-value)</span></label><input type="number" id="opt-high" step="any" value="100"></div>
+<div><label for="opt-status">Status filter <span class="hint">(--status, blank means all)</span></label><input type="text" id="opt-status" placeholder="completed"></div>
+</div>
+<div class="row"><button class="gold" id="run" type="button">Run check</button><button class="alt" id="sample" type="button">Load sample</button><button class="alt" id="sample-clean" type="button">Load clean sample</button><button class="alt" id="download" type="button">Download report</button></div>
+<label for="out">Report</label>
+<pre id="out">Your report will appear here.</pre>
+</div></main>
+<footer>
+<p>Built by AamirTechs. <a href="https://aamirtechs.github.io/">All tools</a> | <a href="https://github.com/aamirtechs/woo-refund-doctor">Source</a></p>
+<p>Privacy: this tool runs 100% in your browser, nothing is uploaded.</p>
+</footer>
+<script id="core">
+// Pure logic port of woo_refund_doctor.py. No DOM access in this block.
+// Decimals are {c: BigInt coefficient, e: exponent} with value c * 10^e,
+// mirroring Python Decimal behaviour for the operations used here.
+function Dec(v) {
+  if (v && typeof v === "object" && typeof v.c === "bigint") return v;
+  var s = String(v).trim();
+  var m = /^([+-]?)(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(s);
+  if (!m) throw new Error("not a number: " + s);
+  var intPart = m[2] || "";
+  var fracPart = (m[3] !== undefined ? m[3] : (m[4] || ""));
+  var exp = (m[5] ? parseInt(m[5], 10) : 0) - fracPart.length;
+  var digits = (intPart + fracPart).replace(/^0+/, "");
+  if (digits === "") return { c: 0n, e: exp };
+  var c = BigInt(digits);
+  if (m[1] === "-") c = -c;
+  return { c: c, e: exp };
+}
+function decStr(d) {
+  if (d.c === 0n) {
+    if (d.e >= 0) return "0" + "0".repeat(d.e);
+    var z = "0.";
+    for (var i = 0; i < -d.e - 1; i++) z += "0";
+    return z + "0";
+  }
+  var neg = d.c < 0n;
+  var digits = (neg ? -d.c : d.c).toString();
+  var out;
+  if (d.e >= 0) out = digits + "0".repeat(d.e);
+  else {
+    var pos = digits.length + d.e;
+    if (pos > 0) out = digits.slice(0, pos) + "." + digits.slice(pos);
+    else out = "0." + "0".repeat(-pos) + digits;
+  }
+  return (neg ? "-" : "") + out;
+}
+function decAdd(a, b) {
+  var e = Math.min(a.e, b.e);
+  var ca = a.c * (10n ** BigInt(a.e - e));
+  var cb = b.c * (10n ** BigInt(b.e - e));
+  return { c: ca + cb, e: e };
+}
+function decCmp(a, b) {
+  var e = Math.min(a.e, b.e);
+  var ca = a.c * (10n ** BigInt(a.e - e));
+  var cb = b.c * (10n ** BigInt(b.e - e));
+  return ca < cb ? -1 : (ca > cb ? 1 : 0);
+}
+function decQuantize2(a) {
+  // Python Decimal.quantize(CENT) with the default context: half even.
+  if (a.e === -2) return { c: a.c, e: -2 };
+  if (a.e > -2) return { c: a.c * (10n ** BigInt(a.e + 2)), e: -2 };
+  var div = 10n ** BigInt(-2 - a.e);
+  var neg = a.c < 0n;
+  var abs = neg ? -a.c : a.c;
+  var q = abs / div;
+  var r = abs % div;
+  if (r * 2n > div || (r * 2n === div && (q & 1n) === 1n)) q += 1n;
+  return { c: neg ? -q : q, e: -2 };
+}
+function moneyStr(amount) { return "$" + decStr(decQuantize2(amount)); }
+function pyRepr(v) {
+  if (v === null || v === undefined) return "None";
+  if (typeof v === "string") {
+    var esc = v.replace(/\\/g, "\\\\").replace(/\n/g, "\\n").replace(/\r/g, "\\r").replace(/\t/g, "\\t");
+    if (v.indexOf("'") >= 0 && v.indexOf('"') < 0) return '"' + esc + '"';
+    return "'" + esc.replace(/'/g, "\\'") + "'";
+  }
+  return String(v);
+}
+function percentStr(part, whole) {
+  if (whole === 0) return "0.0%";
+  return (100.0 * part / whole).toFixed(1) + "%";
+}
+function parseCsv(text) {
+  var rows = [], row = [], field = "", inQuotes = false, i, ch;
+  text = String(text).replace(/^\uFEFF/, "");
+  for (i = 0; i < text.length; i++) {
+    ch = text[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += ch;
+    } else if (ch === '"') inQuotes = true;
+    else if (ch === ",") { row.push(field); field = ""; }
+    else if (ch === "\r") { /* handled by \n */ }
+    else if (ch === "\n") { row.push(field); field = ""; rows.push(row); row = []; }
+    else field += ch;
+  }
+  if (field !== "" || row.length) { row.push(field); rows.push(row); }
+  return rows;
+}
+function csvToObjects(text) {
+  var rows = parseCsv(text).filter(function (r) {
+    return !(r.length === 1 && r[0] === "");
+  });
+  if (!rows.length) return [];
+  var header = rows[0];
+  var out = [];
+  for (var i = 1; i < rows.length; i++) {
+    var obj = {};
+    for (var j = 0; j < header.length; j++) {
+      obj[header[j]] = j < rows[i].length ? rows[i][j] : null;
+    }
+    out.push(obj);
+  }
+  return out;
+}
+function cell(row, name) {
+  var v = row[name];
+  return v === undefined ? null : v;
+}
+function parseDate(value, code, rule) {
+  if (value === null || value === undefined) return null;
+  var text = String(value).trim();
+  if (!text) return null;
+  var patterns = [
+    /^(\d{4})-(\d{1,2})-(\d{1,2})$/,
+    /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/,
+    null, null
+  ];
+  var m, y, mo, d;
+  if ((m = patterns[0].exec(text)) || (m = patterns[1].exec(text))) {
+    y = +m[1]; mo = +m[2]; d = +m[3];
+  } else if ((m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(text)) ||
+             (m = /^(\d{1,2})-(\d{1,2})-(\d{4})$/.exec(text))) {
+    d = +m[1]; mo = +m[2]; y = +m[3];
+  } else {
+    throw new Error("refund " + code + ": " + rule + " has an unparseable date: " + pyRepr(value));
+  }
+  var ms = Date.UTC(y, mo - 1, d);
+  var chk = new Date(ms);
+  if (chk.getUTCFullYear() !== y || chk.getUTCMonth() !== mo - 1 || chk.getUTCDate() !== d) {
+    throw new Error("refund " + code + ": " + rule + " has an unparseable date: " + pyRepr(value));
+  }
+  function p2(n) { return (n < 10 ? "0" : "") + n; }
+  return { days: ms / 86400000, iso: y + "-" + p2(mo) + "-" + p2(d) };
+}
+function parseMoney(value, code, field) {
+  if (value === null || value === undefined) return null;
+  var text = String(value).trim().split("$").join("").split(",").join("");
+  if (!text) return null;
+  try { return Dec(text); }
+  catch (e) {
+    throw new Error("refund " + code + ": " + field + " is not a money value: " + pyRepr(value));
+  }
+}
+var REASON_KEYWORDS = [
+  ["damaged", ["damag", "broken", "torn", "ripped", "cracked", "shattered"]],
+  ["defective", ["defect", "faulty", "not work", "does not work", "stopped working"]],
+  ["wrong-item", ["wrong item", "wrong colour", "wrong color", "wrong size", "wrong product", "incorrect item"]],
+  ["size-fit", ["size", "too small", "too big", "too large", "does not fit", "doesnt fit", "tight", "loose"]],
+  ["late", ["late", "slow", "delay", "never arrived", "did not arrive"]],
+  ["quality", ["quality", "poor", "cheap", "faded", "flimsy", "bad material"]],
+  ["changed-mind", ["changed my mind", "no longer want", "do not want", "dont want", "not needed"]],
+  ["duplicate", ["duplicate", "charged twice", "double charge"]]
+];
+function clusterReason(reason) {
+  var text = (reason || "").trim().toLowerCase();
+  if (!text) return null;
+  for (var i = 0; i < REASON_KEYWORDS.length; i++) {
+    var words = REASON_KEYWORDS[i][1];
+    for (var j = 0; j < words.length; j++) {
+      if (text.indexOf(words[j]) >= 0) return REASON_KEYWORDS[i][0];
+    }
+  }
+  return "other";
+}
+var LATE_ERROR_DAYS = 90, CLUSTER_THRESHOLD = 25.0;
+function F(code, rule, severity, message) {
+  return { code: code, rule: rule, severity: severity, message: message };
+}
+function findingStr(f) {
+  return f.severity.toUpperCase() + " [" + f.rule + "] " + f.code + ": " + f.message;
+}
+function auditRow(row, seenRefundIds, maxDays, highValue) {
+  var findings = [];
+  var refundId = String(cell(row, "refund_id") || "").trim();
+  var display = refundId ? refundId : "(missing refund id)";
+  if (!refundId) {
+    findings.push(F(display, "missing-refund-id", "error", "refund_id is empty"));
+  } else if (Object.prototype.hasOwnProperty.call(seenRefundIds, refundId)) {
+    findings.push(F(refundId, "duplicate-refund-id", "error",
+      "refund_id duplicates order " + seenRefundIds[refundId]));
+  } else {
+    seenRefundIds[refundId] = String(cell(row, "order_id") || "").trim();
+  }
+  var orderId = String(cell(row, "order_id") || "").trim();
+  if (!orderId) findings.push(F(display, "missing-order-id", "error", "order_id is empty"));
+  var product = String(cell(row, "product") || "").trim();
+  if (!product) findings.push(F(display, "missing-product", "error", "product is empty"));
+  var customer = String(cell(row, "customer_email") || "").trim();
+  if (!customer) {
+    findings.push(F(display, "missing-customer-email", "warning",
+      "customer_email is empty, so repeat-refunder checks cannot see this refund"));
+  }
+  var reason = String(cell(row, "reason") || "").trim();
+  if (!reason) findings.push(F(display, "missing-reason", "warning", "no refund reason given"));
+  var refundAmount = null, orderTotal = null;
+  try { refundAmount = parseMoney(cell(row, "refund_amount"), display, "refund_amount"); }
+  catch (e) { findings.push(F(display, "invalid-refund-amount", "error", e.message)); }
+  try { orderTotal = parseMoney(cell(row, "order_total"), display, "order_total"); }
+  catch (e) { findings.push(F(display, "invalid-order-total", "error", e.message)); }
+  if (refundAmount !== null && decCmp(refundAmount, Dec(0)) < 0) {
+    findings.push(F(display, "negative-refund-amount", "error",
+      "refund_amount " + moneyStr(refundAmount) + " is negative"));
+  }
+  if (orderTotal !== null && decCmp(orderTotal, Dec(0)) < 0) {
+    findings.push(F(display, "negative-order-total", "error",
+      "order_total " + moneyStr(orderTotal) + " is negative"));
+  }
+  if (refundAmount !== null && orderTotal !== null) {
+    if (decCmp(refundAmount, orderTotal) > 0) {
+      findings.push(F(display, "refund-over-total", "error",
+        "refunded " + moneyStr(refundAmount) + " on an order totalling " + moneyStr(orderTotal)));
+    } else if (decCmp(refundAmount, orderTotal) === 0 && decCmp(orderTotal, Dec(0)) > 0 &&
+               decCmp(orderTotal, highValue) >= 0) {
+      findings.push(F(display, "full-refund-high-value", "error",
+        "full refund of " + moneyStr(refundAmount) + " on a high-value order"));
+    }
+  }
+  var orderDate = null, refundDate = null;
+  try { orderDate = parseDate(cell(row, "order_date"), display, "order_date"); }
+  catch (e) { findings.push(F(display, "invalid-order-date", "error", e.message)); }
+  try { refundDate = parseDate(cell(row, "refund_date"), display, "refund_date"); }
+  catch (e) { findings.push(F(display, "invalid-refund-date", "error", e.message)); }
+  if (orderDate !== null && refundDate !== null) {
+    if (refundDate.days < orderDate.days) {
+      findings.push(F(display, "refund-before-order", "error",
+        "refunded on " + refundDate.iso + ", before the order date " + orderDate.iso));
+    } else {
+      var gap = refundDate.days - orderDate.days;
+      if (gap > LATE_ERROR_DAYS) {
+        findings.push(F(display, "late-refund", "error", "refunded " + gap + " days after purchase"));
+      } else if (gap > maxDays) {
+        findings.push(F(display, "late-refund", "warning", "refunded " + gap + " days after purchase"));
+      }
+    }
+  }
+  return findings;
+}
+function padRight(s, w) { s = String(s); while (s.length < w) s += " "; return s; }
+function padLeft(s, w) { s = String(s); while (s.length < w) s = " " + s; return s; }
+function audit(rows, maxRate, maxDays, highValue, statusFilter) {
+  var findings = [], seenRefundIds = {}, refundsSeen = 0;
+  var totalRefunded = Dec(0), products = {}, variations = {}, customers = {}, clusters = {};
+  var reasonsSeen = 0;
+  rows.forEach(function (row) {
+    var status = String(cell(row, "status") || "").trim().toLowerCase();
+    if (statusFilter && status !== statusFilter) return;
+    refundsSeen += 1;
+    findings = findings.concat(auditRow(row, seenRefundIds, maxDays, highValue));
+    var product = String(cell(row, "product") || "").trim();
+    var variation = String(cell(row, "variation") || "").trim();
+    var refundAmount = null;
+    try { refundAmount = parseMoney(cell(row, "refund_amount"), "", "refund_amount"); }
+    catch (e) { refundAmount = null; }
+    if (product) {
+      var pe = products[product] || (products[product] = { refunds: 0, refunded: Dec(0) });
+      pe.refunds += 1;
+      if (refundAmount !== null && decCmp(refundAmount, Dec(0)) > 0) pe.refunded = decAdd(pe.refunded, refundAmount);
+    }
+    if (product && variation) {
+      var key = product + " / " + variation;
+      var ve = variations[key] || (variations[key] = { refunds: 0, refunded: Dec(0) });
+      ve.refunds += 1;
+      if (refundAmount !== null && decCmp(refundAmount, Dec(0)) > 0) ve.refunded = decAdd(ve.refunded, refundAmount);
+    }
+    if (refundAmount !== null && decCmp(refundAmount, Dec(0)) > 0) totalRefunded = decAdd(totalRefunded, refundAmount);
+    var customer = String(cell(row, "customer_email") || "").trim();
+    if (customer) customers[customer] = (customers[customer] || 0) + 1;
+    var reason = String(cell(row, "reason") || "").trim();
+    if (reason) {
+      reasonsSeen += 1;
+      var bucket = clusterReason(reason);
+      clusters[bucket] = (clusters[bucket] || 0) + 1;
+    }
+  });
+  Object.keys(products).sort().forEach(function (product) {
+    var entry = products[product];
+    var share = refundsSeen ? 100.0 * entry.refunds / refundsSeen : 0.0;
+    if (refundsSeen >= 5 && share > maxRate) {
+      findings.push(F(product, "product-over-max-rate", "error",
+        entry.refunds + " of " + refundsSeen + " refunds (" + percentStr(entry.refunds, refundsSeen) +
+        ") are for this product, above the " + maxRate.toFixed(1) + "% threshold"));
+    }
+  });
+  Object.keys(customers).sort().forEach(function (customer) {
+    var count = customers[customer];
+    if (count >= 3) {
+      findings.push(F(customer, "repeat-refunder", "error", "this customer has refunded " + count + " times"));
+    } else if (count === 2) {
+      findings.push(F(customer, "repeat-refunder", "warning", "this customer has refunded " + count + " times"));
+    }
+  });
+  Object.keys(clusters).sort().forEach(function (keyword) {
+    var count = clusters[keyword];
+    var share = reasonsSeen ? 100.0 * count / reasonsSeen : 0.0;
+    if (reasonsSeen >= 5 && share > CLUSTER_THRESHOLD) {
+      findings.push(F(keyword, "reason-cluster", "warning",
+        count + " of " + reasonsSeen + " refunds with a reason (" + percentStr(count, reasonsSeen) +
+        ") are about " + keyword));
+    }
+  });
+  function byCount(map, keyName) {
+    return Object.keys(map).map(function (k) {
+      var e = map[k];
+      var rowObj = { refunds: e.refunds !== undefined ? e.refunds : e, refunded: e.refunded };
+      rowObj[keyName] = k;
+      return rowObj;
+    }).sort(function (a, b) {
+      if (b.refunds !== a.refunds) return b.refunds - a.refunds;
+      return a[keyName] < b[keyName] ? -1 : (a[keyName] > b[keyName] ? 1 : 0);
+    });
+  }
+  var productRows = byCount(products, "product");
+  var variationRows = byCount(variations, "variation");
+  var clusterRows = Object.keys(clusters).map(function (k) {
+    return { keyword: k, refunds: clusters[k] };
+  }).sort(function (a, b) {
+    if (b.refunds !== a.refunds) return b.refunds - a.refunds;
+    return a.keyword < b.keyword ? -1 : (a.keyword > b.keyword ? 1 : 0);
+  });
+  var report = { refunds: refundsSeen, totalRefunded: totalRefunded,
+    products: productRows, variations: variationRows, clusters: clusterRows, reasonsSeen: reasonsSeen };
+  return { findings: findings, report: report };
+}
+function formatText(findings, report) {
+  var errors = findings.filter(function (f) { return f.severity === "error"; }).length;
+  var warnings = findings.length - errors;
+  var lines = findings.map(findingStr);
+  lines.push("");
+  lines.push("Refund rate by product (share of all refunds):");
+  report.products.forEach(function (row) {
+    lines.push("  " + padRight(row.product.slice(0, 22), 22) + " " + padLeft(row.refunds, 3) + " " +
+      (row.refunds === 1 ? "refund" : "refunds") + "  " +
+      padLeft("$" + decStr(decQuantize2(row.refunded)), 9) + "  " + percentStr(row.refunds, report.refunds));
+  });
+  var repeated = report.variations.filter(function (v) { return v.refunds >= 2; });
+  if (repeated.length) {
+    lines.push("");
+    lines.push("Refunds by variation (2 or more):");
+    repeated.forEach(function (row) {
+      lines.push("  " + padRight(row.variation.slice(0, 32), 32) + " " + padLeft(row.refunds, 3) + " " +
+        (row.refunds === 1 ? "refund" : "refunds") + "  " +
+        padLeft("$" + decStr(decQuantize2(row.refunded)), 9) + "  " + percentStr(row.refunds, report.refunds));
+    });
+  }
+  if (report.clusters.length) {
+    lines.push("");
+    lines.push("Refund reasons by keyword (share of refunds with a reason):");
+    report.clusters.forEach(function (row) {
+      lines.push("  " + padRight(row.keyword, 14) + " " + padLeft(row.refunds, 3) + " " +
+        (row.refunds === 1 ? "refund" : "refunds") + "  " + percentStr(row.refunds, report.reasonsSeen));
+    });
+  }
+  lines.push("");
+  lines.push("Refunds: " + report.refunds + ", findings: " + findings.length +
+    ", errors: " + errors + ", warnings: " + warnings);
+  lines.push("Total refunded: $" + decStr(decQuantize2(report.totalRefunded)));
+  if (errors === 0 && warnings === 0) lines.push("All refunds clean.");
+  return lines.join("\n") + "\n";
+}
+window.runTool = function (inputText, options) {
+  options = options || {};
+  var maxRate = options.maxRate === undefined || options.maxRate === "" ? 20.0 : Number(options.maxRate);
+  var maxDays = options.maxDays === undefined || options.maxDays === "" ? 30 : parseInt(options.maxDays, 10);
+  var highValue = Dec(options.highValue === undefined || options.highValue === "" ? "100" : String(options.highValue));
+  var statusFilter = options.status ? String(options.status).trim().toLowerCase() : null;
+  var rows = csvToObjects(inputText || "");
+  var result = audit(rows, maxRate, maxDays, highValue, statusFilter);
+  return formatText(result.findings, result.report);
+};
+</script>
+<script>
+var SAMPLE = `refund_id,order_id,product,variation,customer_email,order_date,refund_date,refund_amount,order_total,reason,status
+R-1001,5001,Canvas Tote Bag,Natural,a@example.com,2026-10-01,2026-10-05,25.00,25.00,Changed my mind,completed
+R-1002,5002,Leather Wallet,Brown,b@example.com,2026-09-15,2026-09-20,89.99,89.99,Defective stitching,completed
+R-1003,5003,Silk Scarf,Red,c@example.com,2026-10-02,2026-10-03,45.00,60.00,Wrong item sent,completed
+R-1004,5004,Wool Sweater,Large,a@example.com,2026-08-01,2026-10-15,120.00,120.00,Too small wrong size,completed
+R-1005,5005,Denim Jacket,Medium,d@example.com,2026-10-10,2026-10-12,150.00,120.00,Damaged in transit,completed
+R-1006,5006,Leather Wallet,Black,e@example.com,2026-10-05,2026-10-06,40.00,80.00,Defective zipper,completed
+R-1007,5007,Canvas Tote Bag,Black,a@example.com,2026-09-20,2026-09-25,25.00,25.00,Changed my mind,completed
+R-1008,5008,Wool Sweater,Medium,f@example.com,2026-10-08,2026-10-09,60.00,60.00,Wrong color,completed
+R-1009,5009,Wool Sweater,Large,g@example.com,2026-10-01,2026-10-02,120.00,120.00,Damaged seam,completed
+R-1010,5010,Silk Scarf,Blue,h@example.com,2026-10-11,2026-10-12,30.00,45.00,,completed
+R-1011,5011,Leather Wallet,Brown,i@example.com,2026-10-12,2026-10-13,89.99,89.99,Defective clasp,completed
+R-1001,5012,Canvas Tote Bag,Natural,j@example.com,2026-10-13,2026-10-14,25.00,25.00,Duplicate charge,completed
+R-1013,5013,Denim Jacket,Large,k@example.com,2026-10-14,2026-10-10,110.00,110.00,Late delivery,completed
+R-1014,5014,Wool Sweater,Small,l@example.com,2026-10-15,2026-10-16,not-a-number,70.00,Damaged,completed
+R-1015,5015,Silk Scarf,Green,m@example.com,2026-10-16,2026-10-17,20.00,20.00,Changed my mind,completed
+R-1016,5016,Denim Jacket,Small,n@example.com,2026-06-01,2026-10-20,50.00,90.00,Defective button,completed
+`;
+var SAMPLE_CLEAN = `refund_id,order_id,product,variation,customer_email,order_date,refund_date,refund_amount,order_total,reason,status
+C-1,6001,Canvas Tote Bag,Natural,p@example.com,2026-10-01,2026-10-03,10.00,25.00,Wrong color,completed
+C-2,6002,Leather Wallet,Brown,q@example.com,2026-10-02,2026-10-04,15.00,89.99,Changed my mind,completed
+C-3,6003,Silk Scarf,Red,r@example.com,2026-10-03,2026-10-05,20.00,60.00,Defective stitching,completed
+C-4,6004,Wool Sweater,Large,s@example.com,2026-10-04,2026-10-06,30.00,120.00,Late delivery,completed
+C-5,6005,Denim Jacket,Medium,t@example.com,2026-10-05,2026-10-07,25.00,95.00,Damaged in transit,completed
+`;
+var inputEl = document.getElementById("input");
+var outEl = document.getElementById("out");
+var lastReport = "";
+document.getElementById("file").addEventListener("change", function (ev) {
+  var f = ev.target.files && ev.target.files[0];
+  if (!f) return;
+  var reader = new FileReader();
+  reader.onload = function () { inputEl.value = String(reader.result || ""); };
+  reader.readAsText(f);
+});
+document.getElementById("sample").addEventListener("click", function () { inputEl.value = SAMPLE; });
+document.getElementById("sample-clean").addEventListener("click", function () { inputEl.value = SAMPLE_CLEAN; });
+document.getElementById("run").addEventListener("click", function () {
+  var options = {
+    maxRate: document.getElementById("opt-rate").value,
+    maxDays: document.getElementById("opt-days").value,
+    highValue: document.getElementById("opt-high").value,
+    status: document.getElementById("opt-status").value
+  };
+  try {
+    lastReport = window.runTool(inputEl.value, options);
+    outEl.textContent = lastReport;
+  } catch (e) {
+    lastReport = "ERROR: " + e.message + "\n";
+    outEl.textContent = lastReport;
+  }
+});
+document.getElementById("download").addEventListener("click", function () {
+  var text = lastReport || outEl.textContent;
+  var blob = new Blob([text], { type: "text/plain" });
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement("a");
+  a.href = url;
+  a.download = "woo-refund-report.txt";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,6 @@
+refund_id,order_id,product,variation,customer_email,order_date,refund_date,refund_amount,order_total,reason,status
+C-1,6001,Canvas Tote Bag,Natural,p@example.com,2026-10-01,2026-10-03,10.00,25.00,Wrong color,completed
+C-2,6002,Leather Wallet,Brown,q@example.com,2026-10-02,2026-10-04,15.00,89.99,Changed my mind,completed
+C-3,6003,Silk Scarf,Red,r@example.com,2026-10-03,2026-10-05,20.00,60.00,Defective stitching,completed
+C-4,6004,Wool Sweater,Large,s@example.com,2026-10-04,2026-10-06,30.00,120.00,Late delivery,completed
+C-5,6005,Denim Jacket,Medium,t@example.com,2026-10-05,2026-10-07,25.00,95.00,Damaged in transit,completed

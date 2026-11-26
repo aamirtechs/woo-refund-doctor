@@ -1,0 +1,17 @@
+refund_id,order_id,product,variation,customer_email,order_date,refund_date,refund_amount,order_total,reason,status
+R-1001,5001,Canvas Tote Bag,Natural,a@example.com,2026-10-01,2026-10-05,25.00,25.00,Changed my mind,completed
+R-1002,5002,Leather Wallet,Brown,b@example.com,2026-09-15,2026-09-20,89.99,89.99,Defective stitching,completed
+R-1003,5003,Silk Scarf,Red,c@example.com,2026-10-02,2026-10-03,45.00,60.00,Wrong item sent,completed
+R-1004,5004,Wool Sweater,Large,a@example.com,2026-08-01,2026-10-15,120.00,120.00,Too small wrong size,completed
+R-1005,5005,Denim Jacket,Medium,d@example.com,2026-10-10,2026-10-12,150.00,120.00,Damaged in transit,completed
+R-1006,5006,Leather Wallet,Black,e@example.com,2026-10-05,2026-10-06,40.00,80.00,Defective zipper,completed
+R-1007,5007,Canvas Tote Bag,Black,a@example.com,2026-09-20,2026-09-25,25.00,25.00,Changed my mind,completed
+R-1008,5008,Wool Sweater,Medium,f@example.com,2026-10-08,2026-10-09,60.00,60.00,Wrong color,completed
+R-1009,5009,Wool Sweater,Large,g@example.com,2026-10-01,2026-10-02,120.00,120.00,Damaged seam,completed
+R-1010,5010,Silk Scarf,Blue,h@example.com,2026-10-11,2026-10-12,30.00,45.00,,completed
+R-1011,5011,Leather Wallet,Brown,i@example.com,2026-10-12,2026-10-13,89.99,89.99,Defective clasp,completed
+R-1001,5012,Canvas Tote Bag,Natural,j@example.com,2026-10-13,2026-10-14,25.00,25.00,Duplicate charge,completed
+R-1013,5013,Denim Jacket,Large,k@example.com,2026-10-14,2026-10-10,110.00,110.00,Late delivery,completed
+R-1014,5014,Wool Sweater,Small,l@example.com,2026-10-15,2026-10-16,not-a-number,70.00,Damaged,completed
+R-1015,5015,Silk Scarf,Green,m@example.com,2026-10-16,2026-10-17,20.00,20.00,Changed my mind,completed
+R-1016,5016,Denim Jacket,Small,n@example.com,2026-06-01,2026-10-20,50.00,90.00,Defective button,completed
